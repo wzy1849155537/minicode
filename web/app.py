@@ -72,10 +72,36 @@ def main():
             st.caption(f"**{t.name}** — {t.description[:50]}")
 
         st.divider()
-        st.markdown("### 🎯 已匹配技能")
-        if "last_skills" in st.session_state:
+        st.markdown("### 🎯 可用技能")
+        for s in skill_router._skills.values():
+            with st.expander(f"{s.name} — {s.description}"):
+                st.caption(s.instructions)
+                if s.examples:
+                    st.caption("示例: " + ", ".join(s.examples))
+                st.caption(f"关键词: {', '.join(s.keywords[:5])}")
+
+        st.divider()
+        st.markdown("### 🧠 记忆查看")
+        if st.button("查看最近记忆"):
+            episodes = memory.search_episodes("", limit=10)
+            if episodes:
+                for ep in episodes[:5]:
+                    with st.expander(f"{ep['task'][:40]}... ({ep['outcome'][:30]}...)"):
+                        st.caption(f"任务: {ep['task']}")
+                        st.caption(f"结果: {ep['outcome']}")
+                        if ep.get('tool_calls'):
+                            st.caption(f"工具: {', '.join(ep['tool_calls'])}")
+                        st.caption(f"标签: {ep.get('tags', '无')}")
+            else:
+                st.caption("暂无记忆")
+
+        st.divider()
+        st.markdown("### 🎯 匹配技能")
+        if "last_skills" in st.session_state and st.session_state.last_skills:
             for s in st.session_state.last_skills:
                 st.markdown(f'<span class="skill-tag">{s.name}</span>', unsafe_allow_html=True)
+        else:
+            st.caption("发起任务后自动匹配")
 
     # Chat
     if "messages" not in st.session_state:

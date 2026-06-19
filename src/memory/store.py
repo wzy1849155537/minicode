@@ -65,13 +65,20 @@ class MemoryStore:
         )
         self._conn.commit()
 
-    def search_episodes(self, keyword: str, limit: int = 5) -> List[Dict]:
-        rows = self._conn.execute(
-            "SELECT task, tool_calls, outcome, error, tags, created_at "
-            "FROM episodic WHERE task LIKE ? OR tags LIKE ? "
-            "ORDER BY created_at DESC LIMIT ?",
-            (f"%{keyword}%", f"%{keyword}%", limit),
-        ).fetchall()
+    def search_episodes(self, keyword: str = "", limit: int = 5) -> List[Dict]:
+        if keyword:
+            rows = self._conn.execute(
+                "SELECT task, tool_calls, outcome, error, tags, created_at "
+                "FROM episodic WHERE task LIKE ? OR tags LIKE ? "
+                "ORDER BY created_at DESC LIMIT ?",
+                (f"%{keyword}%", f"%{keyword}%", limit),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT task, tool_calls, outcome, error, tags, created_at "
+                "FROM episodic ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
         return [{
             "task": r[0], "tool_calls": json.loads(r[1]) if r[1] else [],
             "outcome": r[2], "error": r[3], "tags": r[4],
