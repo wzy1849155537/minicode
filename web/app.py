@@ -48,7 +48,16 @@ def get_agent():
     llm = create_llm_from_env()
     tools = ToolRegistry()
     register_all_tools(tools)
-    return AgentLoop(llm=llm, tools=tools, cwd=str(Path.cwd()))
+    from src.security.guard import SecurityGuard
+    from src.context.compressor import ContextCompressor
+    from src.memory.store import MemoryStore
+    security = SecurityGuard()
+    compressor = ContextCompressor()
+    memory = MemoryStore()
+    return AgentLoop(
+        llm=llm, tools=tools, cwd=str(Path.cwd()),
+        security_guard=security, compressor=compressor, memory_store=memory,
+    )
 
 
 def main():
@@ -136,7 +145,27 @@ def main():
 
         with st.chat_message("assistant"):
             with st.spinner("思考中..."):
-                result = agent.run(prompt)
+                # Inject skills
+                instructions = skill_router.get_instructions(skill_names)
+                agent.inject_skills(instructions)
+
+                # Inject memory
+                episodes = memory.search_episodes(prompt, limit=3)
+                patterns = memory.find_patterns(prompt, limit=3)
+                agent.inject_memory(episodes, patterns)
+
+                # RAG search
+                enhanced_prompt = prompt
+                try:
+                    from src.rag_link import RAGConnector
+                    rag = RAGConnector()
+                    ctx = rag.get_context_for_task(prompt)
+                    if ctx:
+                        enhanced_prompt = prompt + "\n\n[知识库参考]\n" + ctx[:1000]
+                except Exception:
+                    pass
+
+                result = agent.run(enhanced_prompt)
 
             st.markdown(result.content)
 

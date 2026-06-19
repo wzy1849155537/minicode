@@ -63,8 +63,32 @@ def chat(
     tools = ToolRegistry()
     register_all_tools(tools)
 
+    # Optional modules
+    from src.security.guard import SecurityGuard
+    from src.context.compressor import ContextCompressor
+    from src.memory.store import MemoryStore
+    from src.skills.router import SkillRouter
+
+    security = SecurityGuard()
+    compressor = ContextCompressor()
+    memory = MemoryStore()
+    skill_router = SkillRouter()
+
     cwd = str(Path.cwd())
-    agent = AgentLoop(llm=llm, tools=tools, cwd=cwd)
+    agent = AgentLoop(
+        llm=llm, tools=tools, cwd=cwd,
+        security_guard=security,
+        compressor=compressor,
+        memory_store=memory,
+    )
+
+    # Try RAG connector
+    rag = None
+    try:
+        from src.rag_link import RAGConnector
+        rag = RAGConnector()
+    except Exception:
+        pass
 
     # Single prompt mode
     if prompt:
@@ -105,6 +129,24 @@ def chat(
 
         console.print("[dim]⏳ 思考中...[/dim]")
         try:
+            # Skill routing
+            skills = skill_router.route(user_input)
+            if skills:
+                instructions = skill_router.get_instructions([s.name for s in skills])
+                agent.inject_skills(instructions)
+                console.print(f"[dim]匹配技能: {', '.join(s.name for s in skills)}[/dim]")
+
+            # Memory injection
+            episodes = memory.search_episodes(user_input, limit=3)
+            patterns = memory.find_patterns(user_input, limit=3)
+            agent.inject_memory(episodes, patterns)
+
+            # RAG search
+            if rag:
+                rag_ctx = rag.get_context_for_task(user_input)
+                if rag_ctx:
+                    user_input += "\n\n[知识库参考]\n" + rag_ctx[:1000]
+
             result = agent.run(user_input)
             console.print()
             console.print(Markdown(result.content))

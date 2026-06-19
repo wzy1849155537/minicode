@@ -14,6 +14,11 @@ from loguru import logger
 from .llm import LLMAdapter
 from .tool_use import ToolRegistry, ToolResult
 
+# Optional integrations (lazy import to avoid circular deps)
+SecurityGuard = None
+ContextCompressor = None
+MemoryStore = None
+
 # ================================================================
 # System Prompt (Chinese-native, concise)
 # ================================================================
@@ -63,14 +68,21 @@ class AgentLoop:
         tools: ToolRegistry,
         cwd: str = "",
         max_turns: int = 30,
+        security_guard=None,
+        compressor=None,
+        memory_store=None,
     ):
         self.llm = llm
         self.tools = tools
         self.cwd = cwd
         self.max_turns = max_turns
+        self.security = security_guard
+        self.compressor = compressor
+        self.memory = memory_store
         self._messages: List[Dict] = []
         self._history: List[TurnResult] = []
         self._total_tokens = 0
+        self._skills_instructions: str = ""
 
     def _build_system_message(self) -> Dict:
         """Build Chinese-native system prompt."""
@@ -107,7 +119,26 @@ class AgentLoop:
             project_tree="\n".join(tree_lines[:50]),
             tools_description=tools_desc,
         )
+        # Append skill instructions
+        if self._skills_instructions:
+            content += "\n\n" + self._skills_instructions
         return {"role": "system", "content": content}
+
+    def inject_skills(self, skills_text: str):
+        """Inject skill instructions into the next system prompt."""
+        self._skills_instructions = skills_text
+
+    def inject_memory(self, episodes: list, patterns: list):
+        """Prepend relevant memories to the next user message."""
+        if episodes or patterns:
+            mem_text = "## 相关历史记忆\n"
+            for ep in episodes[:3]:
+                mem_text += f"- 之前处理过: {ep['task'][:60]} → {ep['outcome'][:60]}\n"
+            for pt in patterns[:3]:
+                mem_text += f"- 经验模式: {pt['pattern']} (成功率 {pt.get('success_rate', 0):.0%})\n"
+            self._memory_context = mem_text
+        else:
+            self._memory_context = ""
 
     def run(self, user_input: str) -> TurnResult:
         """Execute one complete agent turn (may involve multiple tool calls)."""
@@ -115,7 +146,12 @@ class AgentLoop:
         if not self._messages:
             self._messages = [self._build_system_message()]
 
-        self._messages.append({"role": "user", "content": user_input})
+        # Inject memory context if available
+        user_msg = user_input
+        if hasattr(self, '_memory_context') and self._memory_context:
+            user_msg = self._memory_context + "\n## 当前任务\n" + user_input
+
+        self._messages.append({"role": "user", "content": user_msg})
         turn_count = 0
         last_result = None
 
@@ -154,16 +190,36 @@ class AgentLoop:
                 self._history.append(result)
                 return result
 
-            # Execute tools
+            # Execute tools with security check
             logger.info(f"Executing {len(tool_calls)} tool(s)")
-            tool_results = self.tools.execute_multi(tool_calls)
+            tool_results = []
+
+            for tc in tool_calls:
+                tool_name = tc["name"]
+                args = tc.get("arguments", {})
+
+                # Security check
+                if self.security:
+                    decision = self.security.check_tool(tool_name, args)
+                    if not decision.allowed:
+                        logger.warning(f"Blocked {tool_name}: {decision.reason}")
+                        tool_results.append(ToolResult(
+                            tool_name, False, "",
+                            f"安全拦截: {decision.reason}",
+                        ))
+                        continue
+
+                tr = self.tools.execute(tool_name, args)
+                tool_results.append(tr)
+
+            # Compress context if needed
+            if self.compressor:
+                self._messages = self.compressor.compress_messages(self._messages)
 
             # Inject tool results into conversation
             for i, tr in enumerate(tool_results):
-                tool_name = tool_calls[i]["name"]
-                status = "✓" if tr.success else "✗"
                 result_text = (
-                    f"[工具 {tool_name} 执行{status}]\n"
+                    f"[工具 {tr.tool_name} 执行{'✓' if tr.success else '✗'}]\n"
                     f"{tr.output[:3000]}"  # Truncate for context
                 )
                 if tr.error:
