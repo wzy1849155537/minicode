@@ -1,0 +1,29 @@
+# MiniCode 默认配置
+llm:
+  provider: "siliconflow"      # siliconflow | openai | deepseek
+  model: "deepseek-ai/DeepSeek-V3"
+  api_base: "https://api.siliconflow.cn/v1"
+  temperature: 0.3
+  max_tokens: 4096
+
+loop:
+  max_turns: 30               # 单次任务最大轮数
+  tool_timeout: 60             # 工具执行超时(秒)
+
+tools:
+  enabled: ["read_file", "write_file", "edit_file", "grep", "glob", "shell", "git"]
+
+memory:
+  db_path: "./data/memory.db"
+  max_episodes: 1000
+
+context:
+  max_tokens: 8000             # 上下文窗口上限
+  compression_threshold: 6000  # 超过此值触发压缩
+
+skills:
+  auto_load: true              # 自动加载项目匹配的Skill
+
+security:
+  auto_approve: ["read_file", "grep", "glob"]  # 自动批准的工具
+  require_confirm: ["shell", "write_file", "edit_file", "git"]
